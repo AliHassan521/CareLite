@@ -30,6 +30,6 @@ Create table AuditLogs(
 	CreatedAt datetime default getdate()
 );
 
-select * from AuditLogs
+
 
 
