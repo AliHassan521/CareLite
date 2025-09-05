@@ -1,9 +1,7 @@
 using CareLite.Models.DTO;
 using CareLite.Services.Interfaces;
-using CareLite.Models.Domain;
 using Microsoft.AspNetCore.Mvc;
-using System;
-using System.Threading.Tasks;
+
 
 namespace CareLite.Controllers
 {
@@ -12,29 +10,46 @@ namespace CareLite.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;
+
         public AuthController(IAuthService authService)
         {
             _authService = authService;
         }
 
-        [HttpPost("signin")]
-        public async Task<IActionResult> SignIn([FromBody] LoginRequest request)
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
-            var (user, correlationId, error) = await _authService.SignInAsync(request);
-            if (user == null)
+            try
             {
-                return Unauthorized(new { message = error, correlationId });
+                var token = await _authService.LoginAsync(request);
+                return Ok(new { Token = token });
             }
-            // TODO: Generate session/token and return
-            return Ok(new { message = "Sign-in successful.", user = user, correlationId });
+            catch (UnauthorizedAccessException ex)
+            {
+                return Unauthorized(new { Message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Message = "An error occurred", Details = ex.Message });
+            }
         }
 
-        [HttpPost("signout")]
-        public async Task<IActionResult> SignOut([FromQuery] int? userId = null)
+        [HttpPost("register")]
+        public async Task<IActionResult> Register([FromBody] RegisterRequest request)
         {
-            // TODO: Implement session/token invalidation
-            var correlationId = await _authService.SignOutAsync(userId);
-            return Ok(new { message = "Sign-out successful.", correlationId });
+            try
+            {
+                var token = await _authService.RegisterAsync(request);
+                return Ok(new { Token = token });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Conflict(new { Message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Message = "An error occurred", Details = ex.Message });
+            }
         }
     }
 }

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace CareLite.Controllers
 {
     [ApiController]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Staff")]
     [Route("[controller]")]
     public class WeatherForecastController : ControllerBase
     {

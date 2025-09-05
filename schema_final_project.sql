@@ -30,6 +30,15 @@ Create table AuditLogs(
 	CreatedAt datetime default getdate()
 );
 
+-- Clear existing roles if needed
+DELETE FROM Roles;
+
+-- Insert fixed roles
+SET IDENTITY_INSERT Roles ON;
+INSERT INTO Roles (RoleId, RoleName) VALUES (1, 'Admin');
+INSERT INTO Roles (RoleId, RoleName) VALUES (2, 'Staff');
+INSERT INTO Roles (RoleId, RoleName) VALUES (3, 'Clinician');
+SET IDENTITY_INSERT Roles OFF;
 
 
-
+select * from roles

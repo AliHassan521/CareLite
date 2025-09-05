@@ -1,97 +1,105 @@
 ﻿using CareLite.Data;
+using CareLite.Models.Domain;
 using CareLite.Repositories.Interfaces;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
+using System.Data;
+
 
 namespace CareLite.Repositories.Implementations
 {
     public class UserRepository : IUserRepository
     {
-        private readonly CareLiteDbContext _context;
-        public UserRepository(CareLiteDbContext context)
+        private readonly DbManager _dbManager;
+        
+        public UserRepository(DbManager dbManager)
         {
-            _context = context;
+            _dbManager = dbManager;
         }
 
         public async Task<User> GetByUsernameAsync(string username)
         {
-            return await _context.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Username == username);
+            using var conn = _dbManager.GetConnection();
+            using var cmd = new SqlCommand("sp_GetUserByUsername", conn);
+            cmd.CommandType = CommandType.StoredProcedure;
+            cmd.Parameters.AddWithValue("@Username", username);
+
+            await conn.OpenAsync();
+            using var reader = await cmd.ExecuteReaderAsync();
+
+            if (!reader.HasRows) return null;
+
+            await reader.ReadAsync();
+
+            return new User
+            {
+                UserId = (int)reader["UserId"],
+                Username = reader["Username"].ToString(),
+                PasswordHash = reader["PasswordHash"].ToString(),
+                FullName = reader["FullName"].ToString(),
+                Email = reader["Email"].ToString(),
+                Phone = reader["Phone"].ToString(),
+                RoleId = (int)reader["RoleId"],
+                Role = new Role
+                {
+                    RoleId = (int)reader["RoleId"],
+                    RoleName = reader["RoleName"].ToString()
+                },
+                IsActive = (bool)reader["IsActive"],
+                // CreatedAt = (DateTime)reader["CreatedAt"],
+                // UpdatedAt = reader["UpdatedAt"] == DBNull.Value ? null : (DateTime?)reader["UpdatedAt"]
+            };
         }
 
-        public async Task<User?> ValidateCredentialsAsync(string username, string passwordHash)
+        public async Task AuditLogAsync(Guid correlationId, int? userId, string action, string description)
         {
-            using (var connection = _context.Database.GetDbConnection())
-            {
-                await connection.OpenAsync();
-                using (var command = connection.CreateCommand())
-                {
-                    command.CommandText = "ValidateUserCredentials";
-                    command.CommandType = System.Data.CommandType.StoredProcedure;
+            using var conn = _dbManager.GetConnection();
+            using var cmd = new SqlCommand("sp_InsertAuditLog", conn);
+            cmd.CommandType = CommandType.StoredProcedure;
 
-                    var paramUsername = command.CreateParameter();
-                    paramUsername.ParameterName = "@Username";
-                    paramUsername.Value = username;
-                    command.Parameters.Add(paramUsername);
+            cmd.Parameters.AddWithValue("@CorrelationId", correlationId);
+            cmd.Parameters.AddWithValue("@UserId", (object)userId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("Action", action);
+            cmd.Parameters.AddWithValue("@Description", description);
 
-                    var paramPassword = command.CreateParameter();
-                    paramPassword.ParameterName = "@PasswordHash";
-                    paramPassword.Value = passwordHash;
-                    command.Parameters.Add(paramPassword);
-
-                    using (var reader = await command.ExecuteReaderAsync())
-                    {
-                        if (await reader.ReadAsync())
-                        {
-                            return new User
-                            {
-                                UserId = reader.GetInt32(reader.GetOrdinal("UserId")),
-                                Username = reader.GetString(reader.GetOrdinal("Username")),
-                                FullName = reader.GetString(reader.GetOrdinal("FullName")),
-                                Email = reader.GetString(reader.GetOrdinal("Email")),
-                                Phone = reader.IsDBNull(reader.GetOrdinal("Phone")) ? null : reader.GetString(reader.GetOrdinal("Phone")),
-                                RoleId = reader.GetInt32(reader.GetOrdinal("RoleId")),
-                                IsActive = reader.GetBoolean(reader.GetOrdinal("IsActive")),
-                                // Role can be loaded separately if needed
-                            };
-                        }
-                        return null;
-                    }
-                }
-            }
+            await conn.OpenAsync();
+            await cmd.ExecuteNonQueryAsync();
         }
-
-        public async Task InsertAuditLogAsync(Guid correlationId, int? userId, string action, string description)
+        public async Task<User> CreateUserAsync(User user, string password)
         {
-            using (var connection = _context.Database.GetDbConnection())
+            using var conn = _dbManager.GetConnection();
+            using var cmd = new SqlCommand("sp_CreateUser", conn);
+            cmd.CommandType = CommandType.StoredProcedure;
+
+            var passwordHash = BCrypt.Net.BCrypt.HashPassword(password);
+
+            cmd.Parameters.AddWithValue("@Username", user.Username);
+            cmd.Parameters.AddWithValue("@PasswordHash", passwordHash);
+            cmd.Parameters.AddWithValue("@FullName", user.FullName);
+            cmd.Parameters.AddWithValue("@Email", user.Email);
+            cmd.Parameters.AddWithValue("@Phone", user.Phone);
+            cmd.Parameters.AddWithValue("@RoleId", user.RoleId);
+
+            await conn.OpenAsync();
+            using var reader = await cmd.ExecuteReaderAsync();
+            if (!reader.HasRows) return null;
+            await reader.ReadAsync();
+            return new User
             {
-                await connection.OpenAsync();
-                using (var command = connection.CreateCommand())
+                UserId = (int)reader["UserId"],
+                Username = reader["Username"].ToString(),
+                PasswordHash = reader["PasswordHash"].ToString(),
+                FullName = reader["FullName"].ToString(),
+                Email = reader["Email"].ToString(),
+                Phone = reader["Phone"].ToString(),
+                RoleId = (int)reader["RoleId"],
+                Role = new Role
                 {
-                    command.CommandText = "InsertAuditLog";
-                    command.CommandType = System.Data.CommandType.StoredProcedure;
-
-                    var paramCorrelationId = command.CreateParameter();
-                    paramCorrelationId.ParameterName = "@CorrelationId";
-                    paramCorrelationId.Value = correlationId;
-                    command.Parameters.Add(paramCorrelationId);
-
-                    var paramUserId = command.CreateParameter();
-                    paramUserId.ParameterName = "@UserId";
-                    paramUserId.Value = (object?)userId ?? DBNull.Value;
-                    command.Parameters.Add(paramUserId);
-
-                    var paramAction = command.CreateParameter();
-                    paramAction.ParameterName = "@Action";
-                    paramAction.Value = action;
-                    command.Parameters.Add(paramAction);
-
-                    var paramDescription = command.CreateParameter();
-                    paramDescription.ParameterName = "@Description";
-                    paramDescription.Value = description;
-                    command.Parameters.Add(paramDescription);
-
-                    await command.ExecuteNonQueryAsync();
-                }
-            }
+                    RoleId = (int)reader["RoleId"],
+                    RoleName = reader["RoleName"].ToString()
+                },
+                IsActive = (bool)reader["IsActive"],
+                CreatedAt = (DateTime)reader["CreatedAt"]
+            };
         }
     }
 }
